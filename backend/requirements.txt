@@ -1,0 +1,11 @@
+Hypercorn==0.17.3
+fastapi[standard]==0.115.6
+boto3==1.35.90
+pydantic==2.10.4
+instructor==1.7.2
+sqlmodel==0.0.22
+mypy==1.14.1
+anthropic==0.42.0
+colorama==0.4.6
+alembic==1.15.1
+sqlalchemy-stubs==0.4
