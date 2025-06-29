@@ -46,6 +46,7 @@
     "react-dom": "18.3.1",
     "react-hook-form": "^7.54.2",
     "react-native": "0.76.9",
+    "react-native-date-picker": "^5.0.13",
     "react-native-gesture-handler": "~2.20.2",
     "react-native-gifted-charts": "^1.4.60",
     "react-native-keyboard-controller": "^1.17.2",

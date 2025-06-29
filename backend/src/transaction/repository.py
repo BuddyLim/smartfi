@@ -330,7 +330,14 @@ class TransactionRepository:
                     if db_category is None:
                         return None
 
-                    db_transaction.entry_type = db_category.entry_type
+                if key == "date":
+                    db_transaction.date = datetime.strptime(
+                        value,
+                        "%Y-%m-%dT%H:%M:%S.%fZ",
+                    ).replace(
+                        tzinfo=timezone.utc,
+                    )
+                    continue
 
                 setattr(db_transaction, key, value)
 

@@ -146,6 +146,7 @@ class TransactionAgent:
         Args:
             date: Extract date into YYYY-MM-DD format. If only a time period (e.g., 'last year', 'this month') is provided,
             adjust the dates based on context (e.g., 'last year'). If no date is provided, assume it is today which is today.
+            Favour past dates unless specified
             name: Name of transaction
             amount: Transaction amount that is within the text and may contain PEMDAS operations.
             category_name: category name of the transaction
