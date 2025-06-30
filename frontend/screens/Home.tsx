@@ -17,12 +17,15 @@ import {
   Adapt,
   Sheet,
   ScrollView,
+  XStack,
 } from "tamagui";
 import TransactionHeader from "components/transaction/TransactionHeader";
 import TransactionItem from "components/transaction/TransactionItem";
 import { useTransactionQuery } from "hooks/transaction/useTransactionQuery";
 import { USER_ID } from "constants/User";
 import {
+  TransactionEditDraft,
+  TransactionEditProps,
   TransactionHeaderProps,
   TransactionProps,
   TransactionRenderEnum,
@@ -32,7 +35,7 @@ import BottomSheet, {
   BottomSheetView,
 } from "@gorhom/bottom-sheet";
 import { formatDateString } from "utils";
-import { Check, ChevronDown, Plus } from "@tamagui/lucide-icons";
+import { AlertCircle, Check, ChevronDown, Plus } from "@tamagui/lucide-icons";
 import { router } from "expo-router";
 import { TamaguiBottomInput } from "components/transaction/TransactionInput";
 import { Controller, SubmitHandler, useForm } from "react-hook-form";
@@ -74,26 +77,12 @@ export const Home = () => {
     }
   };
 
-  interface TransactionEditProps {
-    id: number;
-    name: string;
-    amount: string;
-    category: {
-      category_id: number;
-      category_name: string;
-    };
-    date: string;
-    account: {
-      account_id: number;
-      account_name: string;
-    };
-  }
-
   const { control, handleSubmit, reset, getValues, setValue } =
-    useForm<TransactionEditProps>();
+    useForm<TransactionEditDraft>();
   const [openDatePicker, setOpenDatePicker] = useState(false);
 
   const handleSelectedItem = (item: TransactionProps) => {
+    console.log(item);
     reset({
       id: item.id,
       name: item.name,
@@ -102,6 +91,7 @@ export const Home = () => {
         category_id: item.category_id,
         category_name: item.category_name,
       },
+      suggested_categories: item.suggested_categories,
       date: item.date,
       account: {
         account_name: item.account_name,
@@ -173,6 +163,8 @@ export const Home = () => {
 
   const { data: categoriesData } = useCategoriesQuery();
   const { data: accountData } = useAccountQuery(USER_ID);
+
+  console.log(getValues("suggested_categories"));
 
   return (
     <>
@@ -261,7 +253,7 @@ export const Home = () => {
         <Portal>
           <BottomSheet
             animateOnMount={false}
-            snapPoints={["60%"]}
+            snapPoints={["63%"]}
             index={-1}
             enableDynamicSizing={false}
             enablePanDownToClose
@@ -352,7 +344,7 @@ export const Home = () => {
                     required: true,
                   }}
                   render={({ field: { value } }) => (
-                    <YStack>
+                    <YStack gap={10}>
                       <Text
                         position="absolute"
                         zIndex={5}
@@ -373,10 +365,17 @@ export const Home = () => {
                           width={"100%"}
                           height={50}
                           paddingLeft={14}
-                          paddingTop={18}
+                          paddingTop={20}
                           iconAfter={ChevronDown}
                         >
-                          <Select.Value>{value?.category_name}</Select.Value>
+                          <XStack gap={3} alignItems="center">
+                            {value?.category_name === "Unknown" ? (
+                              <AlertCircle size={13} color={"darkkhaki"} />
+                            ) : undefined}
+                            <Text fontSize={"$3"} color={"$color11"}>
+                              {value?.category_name}
+                            </Text>
+                          </XStack>
                         </Select.Trigger>
 
                         <Adapt when={true} platform="touch">
@@ -462,6 +461,33 @@ export const Home = () => {
                           </Select.Viewport>
                         </Select.Content>
                       </Select>
+                      {getValues("category")?.category_name === "Unknown" &&
+                      (getValues("suggested_categories")?.length ?? 0) > 0 ? (
+                        <YStack paddingLeft={5} gap={8}>
+                          <Text color={"$color10"} fontSize={"$2"}>
+                            Suggested Categories:
+                          </Text>
+                          <XStack gap={10}>
+                            {getValues("suggested_categories")?.map(
+                              (suggestedCategory) => {
+                                const { category_id, category_name } =
+                                  suggestedCategory;
+                                return (
+                                  <Button
+                                    size={"$2"}
+                                    key={category_id}
+                                    onPress={() =>
+                                      setValue("category", suggestedCategory)
+                                    }
+                                  >
+                                    {category_name}
+                                  </Button>
+                                );
+                              }
+                            )}
+                          </XStack>
+                        </YStack>
+                      ) : null}
                     </YStack>
                   )}
                   name="category"
@@ -533,7 +559,7 @@ export const Home = () => {
                           height={50}
                           paddingLeft={14}
                           paddingTop={18}
-                          marginBottom={60}
+                          marginBottom={80}
                           iconAfter={ChevronDown}
                         >
                           <Select.Value>{value?.account_name}</Select.Value>
@@ -604,7 +630,11 @@ export const Home = () => {
                   )}
                   name="account"
                 />
-                <Button onPress={handleSubmit(handleEditTransaction)}>
+                <Button
+                  onPress={handleSubmit((data) =>
+                    handleEditTransaction(data as TransactionEditProps)
+                  )}
+                >
                   Save
                 </Button>
               </YStack>
@@ -614,7 +644,7 @@ export const Home = () => {
         <DatePicker
           modal
           open={openDatePicker}
-          date={getValues("date") ? new Date(getValues("date")) : new Date()}
+          date={getValues("date") ? new Date(getValues("date")!) : new Date()}
           mode="date"
           onConfirm={(date) => {
             setOpenDatePicker(false);

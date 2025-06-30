@@ -16,7 +16,7 @@ export default function TransactionItem({
   handleSelectedItem,
 }: {
   transaction: TransactionProps;
-  handleSelectedItem: (transaction: TransactionProps) => void;
+  handleSelectedItem?: (transaction: TransactionProps) => void;
 }) {
   const { account_name: accountName, running_balance } = transaction;
 

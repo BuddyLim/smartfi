@@ -22,6 +22,10 @@ export interface TransactionProps {
   running_balance: number;
   type: TransactionRenderEnum;
   lastItem: boolean;
+  suggested_categories: {
+    category_name: string;
+    category_id: number;
+  }[];
 }
 
 export interface TransactionHeaderProps {
@@ -56,3 +60,24 @@ export interface ExpensesGlanceQueryProps {
   past7DaysAvg: number;
   past14DaysAvg: number;
 }
+
+export interface TransactionEditProps {
+  id: number;
+  name: string;
+  amount: string;
+  category: {
+    category_id: number;
+    category_name: string;
+  };
+  date: string;
+  account: {
+    account_id: number;
+    account_name: string;
+  };
+  suggested_categories: {
+    category_name: string;
+    category_id: number;
+  }[];
+}
+
+export type TransactionEditDraft = Partial<TransactionEditProps>;
