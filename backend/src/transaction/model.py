@@ -95,6 +95,7 @@ class TransactionPublic(TransactionBase):
     account_name: str
     currency: str
     running_balance: float
+    suggested_categories: Optional[list[dict]]
 
 
 class StatsDurationBase(BaseModel):

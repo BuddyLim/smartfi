@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from random import randint
 from sqlite3 import DatabaseError
-from typing import Annotated, Any, Union
+from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import Case, Transaction, alias, func, literal, select
+from sqlalchemy import Case, alias, func, literal, select
 from sqlalchemy.orm import Session as SASession
 
 from src.account.model import AccountSA
 from src.category.model import CategorySA
 from src.common.db import DatabaseService, get_db_service
+from src.suggested_category.model import SuggestedCategory
 from src.transaction.model import (
     TransactionCreate,
     TransactionEditRequest,
@@ -182,10 +184,36 @@ class TransactionRepository:
                 msg = "Could not grab data with ID: %d"
                 raise DatabaseError(msg, transaction_id)
 
+            suggested_list = []
+
+            if result.category_name == "Unknown":
+                # Get suggested categories in bulk
+                rows = session.execute(
+                    select(
+                        SuggestedCategory.category_id,
+                        SuggestedCategory.transaction_id,
+                        CategorySA.name,
+                    )
+                    .where(SuggestedCategory.transaction_id == result.id)
+                    .join(
+                        CategorySA,
+                        SuggestedCategory.category_id == CategorySA.id,
+                    )
+                ).all()
+
+                for category_id, transaction_id, name in rows:
+                    suggested_list.append(
+                        {
+                            "category_name": name,
+                            "category_id": category_id,
+                        },
+                    )
+
             return TransactionPublic.model_validate(
                 {
                     **result,
                     "date": result.date.isoformat() + "Z",
+                    "suggested_categories": suggested_list,
                 },
                 from_attributes=True,
             )
@@ -209,7 +237,11 @@ class TransactionRepository:
                     CategorySA.name.label("category_name"),
                 )
                 .where(TransactionSA.user_id == user_id)
-                .join(AccountSA, AccountSA.id == TransactionSA.account_id, isouter=True)
+                .join(
+                    AccountSA,
+                    AccountSA.id == TransactionSA.account_id,
+                    isouter=True,
+                )
                 .join(
                     CategorySA,
                     CategorySA.id == TransactionSA.category_id,
@@ -296,6 +328,34 @@ class TransactionRepository:
                 .all()
             )
 
+            tx_ids = [r.id for r in result_tuples if isinstance(r.id, int)]
+
+            # Get suggested categories in bulk
+            suggested_map: dict[int, list[dict]] = {}
+            rows = session.execute(
+                select(
+                    SuggestedCategory.category_id,
+                    SuggestedCategory.transaction_id,
+                    CategorySA.name,
+                )
+                .where(SuggestedCategory.transaction_id.in_(tx_ids))
+                .join(
+                    CategorySA,
+                    SuggestedCategory.category_id == CategorySA.id,
+                )
+            ).all()
+
+            print(rows)
+
+            suggested_map = defaultdict(list)
+            for category_id, transaction_id, name in rows:
+                suggested_map[transaction_id].append(
+                    {
+                        "category_name": name,
+                        "category_id": category_id,
+                    }
+                )
+
             return [
                 TransactionPublic(
                     category_name=transaction_result.category_name,
@@ -310,6 +370,7 @@ class TransactionRepository:
                     account_name=transaction_result.account_name,
                     currency=transaction_result.currency,
                     running_balance=transaction_result.running_balance,
+                    suggested_categories=suggested_map.get(transaction_result.id, []),
                 )
                 for transaction_result in result_tuples
             ]
