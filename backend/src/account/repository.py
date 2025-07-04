@@ -1,7 +1,8 @@
-from typing import Annotated
+from typing import Annotated, Sequence
 
 from fastapi import Depends
 from sqlalchemy import Case, func, select
+from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.orm import Session
 
 from src.account.model import Account, AccountSA
@@ -61,6 +62,13 @@ class AccountRepository:
                 .group_by(AccountSA.id, AccountSA.name, AccountSA.initial_balance)
             )
 
+            return session.execute(stmt).mappings().all()
+
+    def get_account_transfer_list_by_user_id(self, user_id: int) -> Sequence[AccountSA]:
+        with Session(bind=self.db_service.sa_engine) as session:
+            stmt = select(AccountSA.id, AccountSA.name).where(
+                AccountSA.user_id == user_id,
+            )
             return session.execute(stmt).mappings().all()
 
 

@@ -38,6 +38,18 @@ class CategoryService:
             lower_cased_name=lower_cased_name,
         )
 
+    def get_transfer_category_credit(self) -> CategorySA | None:
+        return self.category_repository.get_category_by_lower_cased_name_and_entry_type(
+            lower_cased_name="transfer",
+            entry_type="credit",
+        )
+
+    def get_transfer_category_debit(self) -> CategorySA | None:
+        return self.category_repository.get_category_by_lower_cased_name_and_entry_type(
+            lower_cased_name="transfer",
+            entry_type="debit",
+        )
+
     def get_categories_by_lower_cased_name(
         self,
         category_list: list[str],

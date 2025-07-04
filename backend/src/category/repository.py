@@ -33,6 +33,21 @@ class CategoryRepository:
                 .one_or_none()
             )
 
+    def get_category_by_lower_cased_name_and_entry_type(
+        self,
+        lower_cased_name: str,
+        entry_type: str,
+    ):
+        with Session(bind=self.db_service.sa_engine) as session:
+            return (
+                session.query(CategorySA)
+                .where(
+                    CategorySA.lower_cased_name == lower_cased_name,
+                    CategorySA.entry_type == entry_type,
+                )
+                .one_or_none()
+            )
+
     def get_categories_by_lower_cased_name(self, category_list: list[str]):
         with Session(bind=self.db_service.sa_engine) as session:
             return (

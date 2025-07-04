@@ -19,6 +19,11 @@ class AccountBase(BaseModel):
     user_id: int
 
 
+class AccountTransfer(BaseModel):
+    name: str
+    id: int
+
+
 class AccountCreate(AccountBase):
     pass
 

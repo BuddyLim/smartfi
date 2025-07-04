@@ -5,9 +5,12 @@ from datetime import datetime, timezone
 from google import genai
 from google.genai import types
 
+from src.account.model import AccountPublic, AccountTransfer
 from src.app_logger.custom_logger import logger
 from src.config import get_settings
 from src.transaction.model import (
+    TransactionBankTransfer,
+    TransactionBankTransferInformation,
     TransactionLLMCreate,
 )
 
@@ -15,14 +18,16 @@ config = get_settings()
 GCP_KEY = config.GCP_KEY
 
 
-def call_function(function_call, functions):
+def call_function(
+    function_call: types.FunctionCall,
+    functions: types.ToolListUnion,
+):
     function_name = function_call.name
     function_args = function_call.args
     # Find the function object from the list based on the function name
     for func in functions:
         if func.__name__ == function_name:
-            return func(**function_args)
-    return None
+            func(**function_args)
 
 
 class TransactionAgent:
@@ -36,6 +41,7 @@ class TransactionAgent:
                 mode=types.FunctionCallingConfigMode.ANY,
             ),
         )
+        self.resp_list: list[TransactionLLMCreate | TransactionBankTransfer] = []
 
     def __format_text(self, text: str):
         resp = self.client.models.generate_content(
@@ -53,12 +59,17 @@ class TransactionAgent:
 
         return resp.text
 
-    def __infer_from_text_config(self, category_list: list[str]):
+    def __infer_from_text_config(
+        self, category_list: list[str], account_list: list[AccountTransfer]
+    ):
         today = datetime.now(tz=timezone.utc).date()
         long_today = today.strftime("%Y-%m-%d")
         today_name = today.strftime("%A")
 
-        tools: types.ToolListUnion = [self.create_transaction_from_text]
+        tools: types.ToolListUnion = [
+            self.create_transaction_from_text,
+            self.create_bank_transfer_from_text,
+        ]
 
         return types.GenerateContentConfig(
             tools=tools,
@@ -68,33 +79,41 @@ class TransactionAgent:
             system_instruction=f"""
             <role>
                 You are an autonomous financial data processing agent.
-            Your task is to analyze financial input strings and extract relevant information.
+                Your task is to analyze financial input strings and extract relevant information.
             </role>
 
             <tools>
                 You have access to the following two tools:
+
                 Tool 1: {self.create_transaction_from_text.__name__}:
                 This tool extracts information from simple financial transaction strings (e.g., "Groceries $50").
                 It outputs data in JSON format, with fields for category_name, amount, name, and date. Use this list,
                 {category_list} to help derive the category.
-                If you really do not and *ABSOULUTELY* unable to figure out the category, assign 'unknown' to it.
+                If you really do not and *ABSOLUTELY* unable to figure out the category, assign 'unknown' to it.
+
+                Tool 2: {self.create_bank_transfer_from_text.__name__}:
+                This tool extracts information from transaction strings (e.g "UOB Maybank 500").
+                It outputs data in JSON format, with fields for bank_from, bank_to, amount and date.
+                Use this account list to help derive the accounts:
+                {account_list}
             </tools>
 
             <objective>
                 Your Goal: Given any input string, you must determine the correct tool to use.
-            Use the appropriate tool to process the input and output ONLY the resulting JSON object.
-            You should NOT provide any introductory text or explanations.
-            If the input seems to be a bank transfer, use Tool 2. If it appears to be a
-            basic financial transaction, use Tool 1.
+                Use the appropriate tool to process the input and output ONLY the resulting JSON object.
+                You should NOT provide any introductory text or explanations.
+                If the input seems to be a bank transfer, use Tool 2.
+                If it appears to be a basic financial transaction, use Tool 1.
             </objective>
 
             <additional-requirements>
-            Today is {long_today} which is a {today_name} in YYYY-MM-DD,
-            convert any human readable dates to YYYY-MM-DD format.
-            If no date is provided, assume it is today.
+                Today is {long_today} which is a {today_name} in YYYY-MM-DD,
+                convert any human readable dates to YYYY-MM-DD format.
+                If no date is provided, assume it is today.
+                Favour past dates unless specified.
 
-            The text may contain more than one financial data
-            Maintain the name casing and isolate each transaction dates
+                The text may contain more than one financial data
+                Maintain the name casing and isolate each transaction dates
             </additional-requirements>
             """,
         )
@@ -103,12 +122,14 @@ class TransactionAgent:
         self,
         text: str,
         category_list: list[str],
+        account_list: list[AccountTransfer],
     ):
         formatted_text = self.__format_text(text=text)
 
-        resp_list = []
-
-        agent_config = self.__infer_from_text_config(category_list=category_list)
+        agent_config = self.__infer_from_text_config(
+            category_list=category_list,
+            account_list=account_list,
+        )
 
         response = self.client.models.generate_content_stream(
             model="gemini-2.0-flash",
@@ -118,20 +139,29 @@ class TransactionAgent:
 
         chunk = response.__next__()
 
-        if chunk.candidates[0].content.parts is None:
-            return
+        if chunk.candidates is None:
+            return None
 
-        for part in chunk.candidates[0].content.parts:
-            if part.function_call:
-                res = call_function(
-                    part.function_call,
-                    agent_config.tools,
-                )
+        content = chunk.candidates[0].content
+        if content is None or getattr(content, "parts", None) is None:
+            return None
 
-                logger.debug(res)
-                resp_list.append(res)
+        if content.parts is None:
+            return None
 
-        yield from resp_list
+        for part in content.parts:
+            if part.function_call is None:
+                continue
+
+            if agent_config.tools is None:
+                continue
+
+            call_function(
+                part.function_call,
+                agent_config.tools,
+            )
+
+        yield from self.resp_list
 
     def create_transaction_from_text(
         self,
@@ -155,11 +185,43 @@ class TransactionAgent:
         </format>
 
         """
-        return TransactionLLMCreate(
-            name=name,
-            amount=amount,
-            date=date,
-            category_name=category_name,
+        self.resp_list.append(
+            TransactionLLMCreate(
+                name=name,
+                amount=amount,
+                date=date,
+                category_name=category_name,
+            )
+        )
+
+    def create_bank_transfer_from_text(
+        self,
+        bank_from: TransactionBankTransferInformation,
+        bank_to: TransactionBankTransferInformation,
+        amount: float,
+        date: str,
+    ):
+        """Create a bank transfer from and towards based on the text.
+
+        <format>
+            Args:
+                date: Extract date into YYYY-MM-DD format. If only a time period (e.g., 'last year', 'this month') is provided,
+                adjust the dates based on context (e.g., 'last year'). If no date is provided, assume it is today which is today.
+                bank_from: Data containing the id of bank transfer from
+                bank_to: Data containing the id of bank transfer to
+                amount: Transaction amount that is within the text and may contain PEMDAS operations.
+            Returns:
+                A dictionary containing the bank transfer.
+        </format>
+        """
+        # Append a TransactionBankTransfer to resp_list for service layer to handle
+        self.resp_list.append(
+            TransactionBankTransfer(
+                bank_from=bank_from,
+                bank_towards=bank_to,
+                amount=amount,
+                date=date,
+            )
         )
 
     def suggest_category(self, text: str, category_list: list[str]) -> None | list[str]:
