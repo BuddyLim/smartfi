@@ -53,6 +53,18 @@ class TransactionBase(BaseModel):
     # date: yyyymmdd
 
 
+class TransactionBankTransferInformation(BaseModel):
+    name: str
+    id: int
+
+
+class TransactionBankTransfer(BaseModel):
+    bank_from: TransactionBankTransferInformation
+    bank_towards: TransactionBankTransferInformation
+    amount: float
+    date: yyyymmdd
+
+
 class TransactionLLMCreate(TransactionBase):
     category_name: str
     date: yyyymmdd

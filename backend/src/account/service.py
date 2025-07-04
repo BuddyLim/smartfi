@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from src.account.model import Account, AccountCreate, AccountPublic
+from src.account.model import Account, AccountCreate, AccountPublic, AccountTransfer
 from src.account.repository import AccountRepository, get_account_repository
 
 
@@ -28,6 +28,13 @@ class AccountService:
 
     def get_account_by_user_id(self, user_id: int):
         return self.account_repository.get_account_by_user_id(user_id=user_id)
+
+    def get_account_transfer_list_by_user_id(self, user_id: int):
+        records = self.account_repository.get_account_transfer_list_by_user_id(
+            user_id=user_id,
+        )
+
+        return [AccountTransfer(id=rec["id"], name=rec["name"]) for rec in records]
 
 
 def get_account_service(
