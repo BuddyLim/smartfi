@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import time
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends, Request
 from pydantic import BaseModel
@@ -13,7 +12,7 @@ from src.account.service import AccountService, get_account_service
 from src.app_logger.custom_logger import logger
 from src.category.service import CategoryService, get_category_service
 from src.common.llm import LLMService, get_llm_service
-from src.redis_client import get_redis_client
+from src.redis_client import get_async_redis_client, get_redis_client
 from src.transaction.agent import TransactionAgent, get_transaction_agent
 from src.transaction.model import (
     EntryType,
@@ -28,14 +27,28 @@ from src.transaction.repository import TransactionRepository, get_transaction_re
 
 
 class CreateTransactionPrompt(BaseModel):
-    """Create transaction DTO."""
+    """Data transfer object for creating transactions with LLM inference.
+
+    Attributes:
+        text: The raw text description of the transaction to be processed
+        category_list: List of available category names for transaction classification
+
+    """
 
     text: str
     category_list: list[str]
 
 
 class TransactionService:
-    """Transaction service handler."""
+    """Service class for managing transaction operations including creation, inference, and streaming.
+
+    This service handles the complete lifecycle of transactions including:
+    - LLM-based transaction inference from text
+    - Transaction creation and management
+    - Real-time streaming of transaction progress
+    - Category suggestions and matching
+    - Bank transfer handling
+    """
 
     def __init__(
         self,
@@ -46,25 +59,53 @@ class TransactionService:
         redis_client: Redis,
         account_service: AccountService,
     ) -> None:
-        """Transaction service init."""
+        """Initialize the TransactionService with required dependencies.
+
+        Args:
+            llm_service: Service for LLM operations and inference
+            transaction_repository: Repository for transaction data operations
+            category_service: Service for category management
+            transaction_agent: Agent for transaction inference and processing
+            redis_client: Redis client for caching and pub/sub operations
+            account_service: Service for account management
+
+        """
         self.llm_service = llm_service
         self.transaction_repository = transaction_repository
         self.category_service = category_service
         self.transaction_agent = transaction_agent
         self.redis_client = redis_client
         self.account_service = account_service
+        # Initialize async Redis client for streaming operations
+        self.async_redis_client = get_async_redis_client()
 
     def __match_infer_data_with_records(
         self,
         transaction: TransactionLLMCreate,
     ):
-        """Return matched inferred data and records from db."""
+        """Match inferred transaction data with existing category records.
+
+        Args:
+            transaction: The LLM-inferred transaction data
+
+        Returns:
+            Category record if found, None otherwise
+
+        """
         return self.category_service.get_category_by_lower_cased_name(
             transaction.category_name,
         )
 
     def create_transaction(self, transaction: TransactionCreate) -> TransactionSA:
-        """Return created transaction."""
+        """Create a new transaction in the database.
+
+        Args:
+            transaction: The transaction data to create
+
+        Returns:
+            The created transaction record
+
+        """
         logger.info("Creating transaction of: %s ", transaction.model_dump_json())
         return self.transaction_repository.create_transaction(
             transaction_create=transaction,
@@ -74,6 +115,15 @@ class TransactionService:
         self,
         query: TransactionLLMCreateRequest,
     ) -> list[int]:
+        """Get category suggestions for a transaction based on text description.
+
+        Args:
+            query: The transaction creation request containing text to analyze
+
+        Returns:
+            List of suggested category IDs based on the text description
+
+        """
         category_model_list = self.category_service.get_category_by_user_id()
 
         category_list = [
@@ -104,7 +154,16 @@ class TransactionService:
         query: TransactionLLMCreateRequest,
         job_id: str,
     ):
-        """Return inferred and created db record from text."""
+        """Infer and create transactions from text description using LLM.
+
+        This method processes text input to infer transaction details, creates
+        database records, and streams progress updates via Redis pub/sub.
+
+        Args:
+            query: The transaction creation request with text to process
+            job_id: Unique identifier for tracking this job's progress
+
+        """
         category_model_list = self.category_service.get_category_by_user_id()
         category_list = [
             category_model.lower_cased_name for category_model in category_model_list
@@ -120,28 +179,49 @@ class TransactionService:
             account_list=account_transfer_list,
         )
         channel = f"job:{job_id}"
+        log = f"{channel}:log"
 
         for transaction in transactions:
             if isinstance(transaction, TransactionBankTransfer):
-                self.handle_bank_transfer(transaction, query, channel)
+                self.handle_bank_transfer(
+                    transaction,
+                    query,
+                    channel,
+                    log=log,
+                )
                 continue
             self.handle_standard_transaction(
                 transaction,
                 query,
                 channel,
+                log=log,
             )
 
         self.redis_client.publish(
             channel=channel,
             message="[DONE]",
         )
+        self.redis_client.expire(log, 120)
 
     def handle_bank_transfer(
         self,
         transaction: TransactionBankTransfer,
         query: TransactionLLMCreateRequest,
         channel: str,
+        log: str,
     ):
+        """Handle bank transfer transactions by creating debit and credit entries.
+
+        Bank transfers require two transactions: a debit from the source account
+        and a credit to the destination account.
+
+        Args:
+            transaction: The bank transfer transaction data
+            query: The original transaction creation request
+            channel: Redis pub/sub channel for streaming updates
+            log: Redis list key for storing transaction logs
+
+        """
         # Create debit transaction for bank_from
         debit_transaction = TransactionCreate(
             category_id=self.category_service.get_transfer_category_debit().id,  # type: ignore
@@ -162,6 +242,10 @@ class TransactionService:
         self.redis_client.publish(
             channel=channel,
             message=t_dumped_debit,
+        )
+        self.redis_client.rpush(
+            log,
+            t_dumped_debit,
         )
 
         # Create credit transaction for bank_towards
@@ -185,13 +269,29 @@ class TransactionService:
             channel=channel,
             message=t_dumped_credit,
         )
+        self.redis_client.rpush(
+            log,
+            t_dumped_credit,
+        )
 
     def handle_standard_transaction(
         self,
         transaction: TransactionLLMCreate,
         query: TransactionLLMCreateRequest,
         channel: str,
+        log: str,
     ):
+        """Handle standard (non-transfer) transactions.
+
+        Creates a single transaction record and streams the result via Redis.
+
+        Args:
+            transaction: The LLM-inferred transaction data
+            query: The original transaction creation request
+            channel: Redis pub/sub channel for streaming updates
+            log: Redis list key for storing transaction logs
+
+        """
         suggested_categories = []
         category = self.__match_infer_data_with_records(transaction)
 
@@ -228,15 +328,38 @@ class TransactionService:
             channel=channel,
             message=t_dumped,
         )
+        self.redis_client.rpush(
+            log,
+            t_dumped,
+        )
 
     async def get_transaction_progress(self, request: Request, job_id: str):
+        """Stream transaction progress updates via Server-Sent Events (SSE).
+
+        This method provides real-time updates for transaction processing jobs.
+        It first sends any backlogged messages, then streams new messages as they arrive.
+
+        Args:
+            request: FastAPI request object for connection management
+            job_id: Unique identifier for the transaction processing job
+
+        Yields:
+            Server-Sent Events formatted messages with transaction data
+
+        """
         pub_sub = self.redis_client.pubsub()
 
         channel = f"job:{job_id}"
-
+        log = f"{channel}:log"
         pub_sub.subscribe(channel)
 
         try:
+            logs: list[str] = self.redis_client.lrange(log, 0, -1)
+            if logs:
+                for msg in logs:
+                    yield f"data: {msg}\n\n"
+                self.redis_client.ltrim(log, len(logs), -1)
+
             while True:
                 message = pub_sub.get_message()
 
@@ -248,7 +371,7 @@ class TransactionService:
 
                     if data == "[DONE]":
                         yield "event: message\ndata: done\n\n"
-                        continue
+                        break
 
                     yield f"event: message\ndata: {data}\n\n"
 
@@ -265,6 +388,16 @@ class TransactionService:
         transaction_id: int | None,
         user_id: int,
     ):
+        """Retrieve transactions for a specific user.
+
+        Args:
+            transaction_id: Optional specific transaction ID to retrieve
+            user_id: ID of the user whose transactions to retrieve
+
+        Returns:
+            List of transaction records for the user
+
+        """
         return self.transaction_repository.get_transactions(user_id=user_id)
 
     def edit_transaction(
@@ -272,6 +405,16 @@ class TransactionService:
         transaction_id: int,
         values: TransactionEditRequest,
     ):
+        """Edit an existing transaction.
+
+        Args:
+            transaction_id: ID of the transaction to edit
+            values: The new values to update the transaction with
+
+        Returns:
+            The updated transaction record
+
+        """
         return self.transaction_repository.edit_transaction(
             transaction_id=transaction_id,
             values=values,
@@ -302,7 +445,7 @@ def get_transaction_service(
         Depends(get_category_service),
     ],
     account_service: Annotated[
-        CategoryService,
+        AccountService,
         Depends(get_account_service),
     ],
     transaction_agent: Annotated[
@@ -314,8 +457,14 @@ def get_transaction_service(
         Depends(get_redis_client),
     ],
 ) -> TransactionService:
-    """Return Transaction service instance."""
+    """Dependency injection factory for TransactionService.
 
+    Creates and configures a TransactionService instance with all required dependencies.
+
+    Returns:
+        Configured TransactionService instance
+
+    """
     return TransactionService(
         transaction_repository=transaction_repository,
         category_service=category_service,
