@@ -139,8 +139,12 @@ export function autoCompleteJSON(jsonString: string) {
 export const formatTransactions = (data: TransactionProps[]) => {
   const transactionByDate: Record<string, TransactionByDateProps> = {};
 
-  for (let i = 0; i < data.length; i++) {
-    const transaction = data[i];
+  const sortedData = [...data].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+
+  for (let i = 0; i < sortedData.length; i++) {
+    const transaction = sortedData[i];
     const { amount, date, entry_type } = transaction;
     const transactionDate = new Date(date);
     const formattedDate = transactionDate.toISOString().split("T")[0];
