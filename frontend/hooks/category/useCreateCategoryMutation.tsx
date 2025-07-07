@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CategoryKey } from "app/(tabs)/profile/categories";
 import { BaseURL } from "constants/BaseUrl";
+import { CategoryKey } from "keys/category";
 import { CreateCategoryMutationProps } from "types/category";
 
 export const useCreateCategoryMutation = () => {
