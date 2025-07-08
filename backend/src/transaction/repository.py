@@ -406,6 +406,40 @@ class TransactionRepository:
             session.refresh(db_transaction)
             return db_transaction
 
+    def delete_transaction(self, transaction_id: int, user_id: int) -> bool:
+        """Delete a transaction by ID, ensuring it belongs to the specified user.
+
+        Args:
+            transaction_id: ID of the transaction to delete
+            user_id: ID of the user who owns the transaction
+
+        Returns:
+            True if transaction was deleted successfully
+
+        Raises:
+            DatabaseError: If transaction not found or doesn't belong to user
+
+        """
+        with SASession(bind=self.db_service.sa_engine) as session:
+            # First check if transaction exists and belongs to user
+            transaction = session.get(TransactionSA, transaction_id)
+            if transaction is None:
+                msg = "Transaction not found"
+                raise DatabaseError(msg, transaction_id)
+
+            if transaction.user_id != user_id:
+                msg = "Transaction does not belong to user"
+                raise DatabaseError(
+                    msg,
+                    transaction_id,
+                )
+
+            # Delete the transaction
+            session.delete(transaction)
+            session.commit()
+
+            return True
+
 
 def get_transaction_repository(
     db_service: Annotated[

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import Depends, Request
-from pydantic import BaseModel
-from redis import Redis
+from redis import Redis  # noqa: TC002
 
 from src.account.model import AccountTransfer
 from src.account.service import AccountService, get_account_service
@@ -24,19 +23,6 @@ from src.transaction.model import (
     TransactionSA,
 )
 from src.transaction.repository import TransactionRepository, get_transaction_repository
-
-
-class CreateTransactionPrompt(BaseModel):
-    """Data transfer object for creating transactions with LLM inference.
-
-    Attributes:
-        text: The raw text description of the transaction to be processed
-        category_list: List of available category names for transaction classification
-
-    """
-
-    text: str
-    category_list: list[str]
 
 
 class TransactionService:
@@ -420,15 +406,28 @@ class TransactionService:
             values=values,
         )
 
-    # def delete_transaction(self, transaction_id: int) -> Literal[True]:
-    #     """Return flag for deleted transaction."""
-    #     stmt = select(TransactionSA).where(TransactionSA.id == transaction_id)
-    #     result = self.db_service.execute_statement_sa(stmt)
+    def delete_transaction(
+        self,
+        transaction_id: int,
+        user_id: int,
+    ) -> bool:
+        """Delete a transaction.
 
-    #     transaction = result.scalar_one_or_none()
-    #     # self.db_service.delete_row(transaction)
+        Args:
+            transaction_id: ID of the transaction to delete
+            user_id: ID of the user who owns the transaction
 
-    #     # return True
+        Returns:
+            True if transaction was deleted successfully
+
+        Raises:
+            DatabaseError: If transaction not found or doesn't belong to user
+        """
+        logger.info("Deleting transaction %d for user %d", transaction_id, user_id)
+        return self.transaction_repository.delete_transaction(
+            transaction_id=transaction_id,
+            user_id=user_id,
+        )
 
 
 def get_transaction_service(

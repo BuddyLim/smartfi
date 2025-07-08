@@ -1,28 +1,20 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from sqlite3 import DatabaseError
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import (
-    APIRouter,
-    BackgroundTasks,
-    Depends,
-    HTTPException,
-    Request,
-)
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.app_logger.custom_logger import logger
-from src.common.stats import (
-    DurationModel,
-    StatsService,
-    get_stats_service,
-)
+from src.common.stats import DurationModel, StatsService, get_stats_service
 from src.transaction.model import (
     ExpenseStatsDurationPublic,
     NetWorthStatsDurationPublic,
     TransactionCreate,
+    TransactionDeleteRequest,
     TransactionEditRequest,
     TransactionGetByIDRequest,
     TransactionGetByUserIDRequest,
@@ -170,6 +162,48 @@ def create_transactions(
         return transaction
     except Exception as err:
         raise HTTPException(status_code=500, detail=err)
+
+
+@router.delete(
+    "/transaction/delete",
+    tags=[TRANSACTION_TAG],
+)
+def delete_transaction(
+    query: TransactionDeleteRequest,
+    transaction_service: Annotated[
+        TransactionService,
+        Depends(get_transaction_service),
+    ],
+):
+    """Delete a transaction by ID.
+
+    Args:
+        query: Contains transaction_id and user_id for deletion
+
+    Returns:
+        Success message if transaction was deleted
+
+    Raises:
+        HTTPException: If transaction not found or doesn't belong to user
+    """
+    try:
+        success = transaction_service.delete_transaction(
+            transaction_id=query.transaction_id,
+            user_id=query.user_id,
+        )
+        if success:
+            return {"message": "Transaction deleted successfully"}
+
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    except DatabaseError as err:
+        logger.exception("Database error deleting transaction: %s", err)
+        raise HTTPException(
+            status_code=404,
+            detail="Transaction not found or access denied",
+        )
+    except Exception as err:
+        logger.exception("Error deleting transaction: %s", err)
+        raise HTTPException(status_code=500, detail=str(err))
 
 
 @router.post(

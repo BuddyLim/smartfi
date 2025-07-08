@@ -35,7 +35,13 @@ import BottomSheet, {
   BottomSheetView,
 } from "@gorhom/bottom-sheet";
 import { formatDateString } from "utils";
-import { AlertCircle, Check, ChevronDown, Plus } from "@tamagui/lucide-icons";
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  Plus,
+  Trash,
+} from "@tamagui/lucide-icons";
 import { router } from "expo-router";
 import { TamaguiBottomInput } from "components/transaction/TransactionInput";
 import { Controller, SubmitHandler, useForm } from "react-hook-form";
@@ -44,6 +50,7 @@ import { BaseURL } from "constants/BaseUrl";
 import DatePicker from "react-native-date-picker";
 import { useCategoriesQuery } from "hooks/category/useCategoriesQuery";
 import { useAccountQuery } from "hooks/account/useAccountQuery";
+import { useDeleteTransactionMutation } from "hooks/transaction/useDeleteTransactionMutation";
 
 export const Home = () => {
   const insets = useSafeAreaInsets();
@@ -144,6 +151,21 @@ export const Home = () => {
     });
   };
 
+  const handleDeleteTransaction = async () => {
+    const transactionId = getValues("id");
+    if (!transactionId) return;
+
+    try {
+      await deleteTransaction({
+        transaction_id: transactionId,
+        user_id: USER_ID,
+      });
+      sheetRef.current?.close();
+    } catch (error) {
+      console.error("Failed to delete transaction:", error);
+    }
+  };
+
   const stickyHeaderIndices = transactionData
     ?.map((item, index) => {
       if (item.type === TransactionRenderEnum.HEADER) {
@@ -163,6 +185,7 @@ export const Home = () => {
 
   const { data: categoriesData } = useCategoriesQuery();
   const { data: accountData } = useAccountQuery(USER_ID);
+  const { mutateAsync: deleteTransaction } = useDeleteTransactionMutation();
 
   console.log(getValues("suggested_categories"));
 
@@ -276,7 +299,24 @@ export const Home = () => {
           >
             <BottomSheetView style={{ paddingHorizontal: 25, paddingTop: 5 }}>
               <YStack gap={20}>
-                <H6 fontWeight={"500"}>Edit Transaction</H6>
+                <XStack justifyContent="space-between" alignItems="center">
+                  <H6 fontWeight={"500"}>Edit Transaction</H6>
+                  <Button
+                    chromeless
+                    size={"$2"}
+                    circular
+                    onLongPress={handleDeleteTransaction}
+                    icon={
+                      <Trash
+                        color="$red10"
+                        size={18}
+                        strokeWidth={2}
+                        stroke={"$red10"}
+                        fill={"$red10"}
+                      />
+                    }
+                  />
+                </XStack>
                 <Controller
                   control={control}
                   rules={{
