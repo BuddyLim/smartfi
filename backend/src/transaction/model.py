@@ -33,6 +33,12 @@ class TransactionGetByUserIDRequest(BaseTransactionGetRequest):
     pass
 
 
+class TransactionDeleteRequest(BaseTransactionGetRequest):
+    """Request model for deleting a transaction."""
+
+    transaction_id: int
+
+
 class TransactionLLMCreateRequest(BaseModel):
     text: str
     account_id: int
